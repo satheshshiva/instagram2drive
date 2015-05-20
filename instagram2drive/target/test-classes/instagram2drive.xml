@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:core="http://www.mulesoft.org/schema/mule/core" xmlns:data-mapper="http://www.mulesoft.org/schema/mule/ee/data-mapper" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:https="http://www.mulesoft.org/schema/mule/https" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.6.1"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/https http://www.mulesoft.org/schema/mule/https/current/mule-https.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="${port}" doc:name="HTTP Listener Configuration"/>
+    <http:request-config name="HTTP_Request_Configuration_self" host="${host}" port="${port}" doc:name="HTTP Request Configuration"/>
+    <http:request-config name="HTTP_Request_Configuration" protocol="HTTPS" host="googleapis.com" port="443" doc:name="HTTP Request Configuration"/>
+    <flow name="entryFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/" doc:name="Root Listener">
+            <http:response-builder statusCode="302">
+                <http:header headerName="Location" value="${instagram.authorizeUrl}"/>
+            </http:response-builder>
+        </http:listener>
+        <set-payload value="Redirecting to Instagram Login" doc:name="Set Payload"/>
+    </flow>
+    <flow name="instagramAuthFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/redirectUrl" doc:name="Instagram Redirect Listener"/>
+        <choice doc:name="Choice">
+            <when expression="#[message.inboundProperties['http.query.params'].error==null]">
+                <flow-ref name="instagramAuthSubFlow" doc:name="instagramAuthSubFlow"/>
+                <choice doc:name="Choice">
+                    <when expression="#[flowVars.instagramAuthResponse.access_token != null]">
+                        <http:request config-ref="HTTP_Request_Configuration_self" path="redirectToGoogle" method="GET" doc:name="Google Login">
+                            <http:request-builder/>
+                        </http:request>
+                    </when>
+                    <otherwise>
+                        <expression-component doc:name="Show Error Message"><![CDATA[payload = 'Error Occured: \n ';
+payload += '\nHTTP Status code: ' #flowVars.instagramAuthResponse.code;
+payload += '\nError: ' #flowVars.instagramAuthResponse.error_type ;
+payload += '\nMessage: '#flowVars.instagramAuthResponse.error_message ;]]></expression-component>
+                    </otherwise>
+                </choice>
+            </when>
+            <otherwise>
+                <expression-component doc:name="Show Error Message"><![CDATA[payload = 'Error Occured: \n ';
+payload += '\nError: ' #message.inboundProperties['http.query.params'].error;
+payload += '\nMessage: '#message.inboundProperties['http.query.params'].error_reason ;]]></expression-component>
+            </otherwise>
+        </choice>
+    </flow>
+    <sub-flow name="instagramAuthSubFlow">
+        <expression-component doc:name="Setting POST params"><![CDATA[payload = '&client_id=${instagram.clientId}';
+payload += '&client_secret=${instagram.clientSecret}';
+payload += '&grant_type=${instagram.grantType}';
+payload += '&redirect_uri=${instagram.localRedirectUrl}';
+payload += '&code=' + message.inboundProperties['http.query.params'].code;]]></expression-component>
+        <https:outbound-endpoint exchange-pattern="request-response" method="POST" address="${instagram.accessTokenUrl}" contentType="application/x-www-form-urlencoded" doc:name="TokenUrl Request"/>
+        <json:json-to-object-transformer returnClass="com.instagram2drive.json.responses.InstagramAuthResponse" doc:name="JSON to Object"/>
+        <set-variable variableName="instagramAuthResponse" value="#[payload]" doc:name="Variable"/>
+        <component class="com.instgram2drive.user.StoreInstagramUser" doc:name="Store Instagram UserDetails"/>
+    </sub-flow>
+    <flow name="googleRedirectFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/redirectToGoogle" doc:name="Redirect Google Login">
+            <http:response-builder statusCode="302">
+                <http:header headerName="Location" value="${google.authorizeUrl}"/>
+            </http:response-builder>
+            <http:error-response-builder>
+            </http:error-response-builder>
+        </http:listener>
+        <set-payload value="Redirecting to Google Login" doc:name="Set Payload"/>
+    </flow>
+    <flow name="googleAuthFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/googleAuthRedirectUrl" doc:name="Google Redirect Listener"/>
+        <choice doc:name="Choice">
+            <when expression="#[message.inboundProperties['http.query.params'].error==null]">
+                <flow-ref name="googleAuthSubFlow" doc:name="googleAuthSubFlow"/>
+                <choice doc:name="Choice">
+                    <when expression="#[flowVars.googleAuthResponse.access_token != null]">
+                        <flow-ref name="mainProcessSubFlow" doc:name="mainProcessSubFlow"/>
+                    </when>
+                    <otherwise>
+                        <expression-component doc:name="Show Error Message"><![CDATA[payload = 'Error Occured: \n ';
+payload += '\nHTTP Status code: ' #flowVars.googleAuthResponse.code;
+payload += '\nError: ' #flowVars.googleAccessToken.error_type ;
+payload += '\nMessage: '#flowVars.googleAccessToken.error_message ;]]></expression-component>
+                    </otherwise>
+                </choice>
+            </when>
+            <otherwise>
+                <expression-component doc:name="Show Error Message"><![CDATA[payload = 'Error Occured: \n ';
+payload += '\nError: ' #message.inboundProperties['http.query.params'].error;
+payload += '\nMessage: '#message.inboundProperties['http.query.params'].error_reason ;]]></expression-component>
+            </otherwise>
+        </choice>
+    </flow>
+    <sub-flow name="googleAuthSubFlow">
+        <expression-component doc:name="Setting POST params"><![CDATA[payload = 'code=' + message.inboundProperties['http.query.params'].code;
+payload += '&client_id=${google.clientId}';
+payload += '&client_secret=${google.clientSecret}';
+payload += '&redirect_uri=${google.localRedirectUrl}';
+payload += '&grant_type=${google.grantType}';]]></expression-component>
+        <https:outbound-endpoint exchange-pattern="request-response" method="POST" address="${google.accessTokenUrl}" contentType="application/x-www-form-urlencoded" doc:name="TokenUrl Request (Deprecated)"/>
+        <json:json-to-object-transformer returnClass="com.instagram2drive.json.responses.GoogleAuthResponse" doc:name="JSON to Object"/>
+        <set-variable variableName="googleAuthResponse" value="#[payload]" doc:name="Variable"/>
+        <component class="com.instgram2drive.user.StoreGoogleUser" doc:name="Store Google UserDetails"/>
+    </sub-flow>
+    <sub-flow name="mainProcessSubFlow">
+        <component class="com.instagram2drive.process.MainProcess" doc:name="Main Process"/>
+    </sub-flow>
+    <!-- <flow name="testFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/test" doc:name="Test Listener"/>
+        <flow-ref name="mainProcessSubFlow" doc:name="Flow Reference"/>
+    </flow>
+   -->
+</mule>
