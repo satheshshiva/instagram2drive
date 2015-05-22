@@ -29,6 +29,7 @@ http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/fil
                 <flow-ref name="instagramAuthSubFlow" doc:name="instagramAuthSubFlow"/>
                 <choice doc:name="Choice">
                     <when expression="#[flowVars.instagramAuthResponse.access_token != null]">
+                        <component class="com.instgram2drive.user.StoreInstagramUser" doc:name="Store Instagram UserDetails"/>
                         <http:request config-ref="HTTP_Request_Configuration_self" path="redirectToGoogle" method="GET" doc:name="Google Login">
                             <http:request-builder/>
                         </http:request>
@@ -57,7 +58,6 @@ payload += '&code=' + message.inboundProperties['http.query.params'].code;]]></e
         <https:outbound-endpoint exchange-pattern="request-response" method="POST" address="${instagram.accessTokenUrl}" contentType="application/x-www-form-urlencoded" doc:name="TokenUrl Request"/>
         <json:json-to-object-transformer returnClass="com.instagram2drive.json.responses.InstagramAuthResponse" doc:name="JSON to Object"/>
         <set-variable variableName="instagramAuthResponse" value="#[payload]" doc:name="Variable"/>
-        <component class="com.instgram2drive.user.StoreInstagramUser" doc:name="Store Instagram UserDetails"/>
     </sub-flow>
     <flow name="googleRedirectFlow">
         <http:listener config-ref="HTTP_Listener_Configuration" path="/redirectToGoogle" doc:name="Redirect Google Login">
@@ -76,6 +76,7 @@ payload += '&code=' + message.inboundProperties['http.query.params'].code;]]></e
                 <flow-ref name="googleAuthSubFlow" doc:name="googleAuthSubFlow"/>
                 <choice doc:name="Choice">
                     <when expression="#[flowVars.googleAuthResponse.access_token != null]">
+                        <component class="com.instgram2drive.user.StoreGoogleUser" doc:name="Store Google UserDetails"/>
                         <flow-ref name="mainProcessSubFlow" doc:name="mainProcessSubFlow"/>
                     </when>
                     <otherwise>
@@ -102,7 +103,6 @@ payload += '&grant_type=${google.grantType}';]]></expression-component>
         <https:outbound-endpoint exchange-pattern="request-response" method="POST" address="${google.accessTokenUrl}" contentType="application/x-www-form-urlencoded" doc:name="TokenUrl Request (Deprecated)"/>
         <json:json-to-object-transformer returnClass="com.instagram2drive.json.responses.GoogleAuthResponse" doc:name="JSON to Object"/>
         <set-variable variableName="googleAuthResponse" value="#[payload]" doc:name="Variable"/>
-        <component class="com.instgram2drive.user.StoreGoogleUser" doc:name="Store Google UserDetails"/>
     </sub-flow>
     <sub-flow name="mainProcessSubFlow">
         <component class="com.instagram2drive.process.MainProcess" doc:name="Main Process"/>
